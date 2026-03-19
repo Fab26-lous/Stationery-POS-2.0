@@ -1,4 +1,4 @@
-const API_BASE_URL = 'PASTE_YOUR_DEPLOYED_APPS_SCRIPT_WEB_APP_URL_HERE';
+const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
 
 const stores = {
   store1: { name: 'One Stop', users: { Cashier: 'Glam2025' } },
