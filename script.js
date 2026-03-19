@@ -16,24 +16,21 @@ let purchaseItems = [];
 function setStatus(message) { document.getElementById('sync-status').textContent = message; }
 function storeName() { return stores[currentStore]?.name || ''; }
 
-// Unified API request function using GET for everything (CORS-friendly for Apps Script)
-async function apiRequest(action, data = {}) {
+// For GET requests (reading data)
+async function apiGet(action, params = {}) {
   const url = new URL(API_BASE_URL);
-  
-  // Add action parameter
   url.searchParams.append('action', action);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) {
+      url.searchParams.append(k, v);
+    }
+  });
   
-  // For operations that need data, stringify and add as a parameter
-  if (Object.keys(data).length > 0) {
-    url.searchParams.append('data', JSON.stringify(data));
-  }
-  
-  console.log('Request URL:', url.toString());
-  console.log('Request data:', data);
+  console.log('GET Request URL:', url.toString());
   
   try {
     const response = await fetch(url.toString(), {
-      method: 'GET', // Always use GET for Apps Script to avoid CORS preflight
+      method: 'GET',
       mode: 'cors',
       headers: {
         'Accept': 'application/json',
@@ -44,13 +41,53 @@ async function apiRequest(action, data = {}) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const result = await response.json();
-    console.log('Response:', result);
-    return result;
+    return await response.json();
   } catch (error) {
-    console.error('API Request Error:', error);
+    console.error('API GET Error:', error);
     return { ok: false, error: error.message };
   }
+}
+
+// For POST requests (submitting data) - using JSONP-like approach
+async function apiPost(action, data = {}) {
+  return new Promise((resolve, reject) => {
+    // Create a unique callback name
+    const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
+    
+    // Create a URL with parameters
+    const url = new URL(API_BASE_URL);
+    url.searchParams.append('action', action);
+    url.searchParams.append('data', JSON.stringify(data));
+    url.searchParams.append('callback', callbackName);
+    
+    // Create script element
+    const script = document.createElement('script');
+    script.src = url.toString();
+    
+    // Define callback function
+    window[callbackName] = function(response) {
+      try {
+        // Clean up
+        delete window[callbackName];
+        document.body.removeChild(script);
+        
+        console.log('JSONP Response:', response);
+        resolve(response);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    
+    // Handle errors
+    script.onerror = function() {
+      delete window[callbackName];
+      document.body.removeChild(script);
+      reject(new Error('Network error'));
+    };
+    
+    // Add script to document
+    document.body.appendChild(script);
+  });
 }
 
 function checkLogin() {
@@ -79,7 +116,7 @@ function selectStore(storeId) {
 async function loadProducts() {
   try {
     setStatus('Loading products...');
-    const res = await apiRequest('products', { store: storeName() });
+    const res = await apiGet('products', { store: storeName() });
     if (!res.ok) throw new Error(res.error || 'Failed to load products');
     products = res.data.map(p => ({
       id: p.productId,
@@ -196,7 +233,7 @@ async function submitAllSales() {
   if (!currentSales.length) return alert('No items to submit');
   try {
     setStatus('Submitting sales...');
-    const res = await apiRequest('sales', { 
+    const res = await apiPost('sales', { 
       store: storeName(), 
       cashier: currentUser, 
       items: currentSales 
@@ -216,7 +253,7 @@ async function submitAllSales() {
 
 async function showStockLevels() {
   try {
-    const res = await apiRequest('stock', {});
+    const res = await apiGet('stock', {});
     if (!res.ok) return alert('Could not load stock');
     allStoreProducts = res.data;
     populateStockTable(allStoreProducts);
@@ -308,7 +345,7 @@ async function submitStockAdjustment() {
   if (!adjustmentItems.length) return alert('No adjustment items');
   try {
     setStatus('Submitting adjustments...');
-    const res = await apiRequest('adjustments', { 
+    const res = await apiPost('adjustments', { 
       store: storeName(), 
       items: adjustmentItems, 
       timestamp: new Date().toISOString() 
@@ -341,7 +378,7 @@ async function submitExpense() {
       paymentMethod: document.getElementById('expense-payment').value,
       timestamp: new Date().toISOString()
     };
-    const res = await apiRequest('cashout', payload);
+    const res = await apiPost('cashout', payload);
     if (!res.ok) throw new Error(res.error || 'Expense submit failed');
     alert('Expense recorded');
     hideExpenseModal();
@@ -416,7 +453,7 @@ async function submitPurchases() {
   if (!purchaseItems.length) return alert('No purchase items');
   try {
     const totalSpend = purchaseItems.reduce((s, x) => s + ((Number(x.quantity)||0)*(Number(x.costPrice)||0)), 0);
-    const res = await apiRequest('purchase', {
+    const res = await apiPost('purchase', {
       store: storeName(),
       supplier: document.getElementById('purchase-supplier').value,
       paymentMethod: document.getElementById('purchase-payment').value,
