@@ -18,19 +18,55 @@ function storeName() { return stores[currentStore]?.name || ''; }
 
 async function apiGet(action, params = {}) {
   const url = new URL(API_BASE_URL);
-  url.searchParams.set('action', action);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const response = await fetch(url.toString());
-  return response.json();
-}
-
-async function apiPost(payload) {
-  const response = await fetch(API_BASE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+  
+  // Add action parameter
+  url.searchParams.append('action', action);
+  
+  // Add all other parameters
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) {
+      url.searchParams.append(k, v);
+    }
   });
-  return response.json();
+  
+  try {
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+    
+    // Check if response is ok
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('API GET Error:', error);
+    return { ok: false, error: error.message };
+  }
+}
+async function apiPost(payload) {
+  try {
+    const response = await fetch(API_BASE_URL, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('API POST Error:', error);
+    return { ok: false, error: error.message };
+  }
 }
 
 function checkLogin() {
