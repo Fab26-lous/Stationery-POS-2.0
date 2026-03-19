@@ -171,10 +171,10 @@ async function submitAllSales() {
     alert(`Submitted ${res.inserted} sales line(s)`);
     loadProducts();
   } catch (error) {
-    console.error(error);
-    setStatus('Sales sync failed');
-    alert('Sales submission failed. Check the endpoint URL and deployment permissions.');
-  }
+  console.error(error);
+  setStatus('Sales sync failed');
+  alert('Sales submission failed: ' + error.message);
+}
 }
 
 async function showStockLevels() {
@@ -342,8 +342,8 @@ async function submitPurchases() {
     setStatus(`Purchases synced: ${res.inserted}`);
     loadProducts();
   } catch (error) {
-    console.error(error);
-    setStatus('Purchase sync failed');
-    alert('Purchase submission failed');
-  }
+  console.error(error);
+  setStatus('Purchase sync failed');
+  alert('Purchase submission failed: ' + error.message);
+}
 }
