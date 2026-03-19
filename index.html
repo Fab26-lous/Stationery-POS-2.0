@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stationery POS</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="login-container" id="login-container">
+    <h2>POS Login</h2>
+    <input type="text" id="username" placeholder="Username">
+    <input type="password" id="password" placeholder="Password">
+    <button onclick="checkLogin()">Login</button>
+    <p id="login-error" class="error-text"></p>
+  </div>
+
+  <div class="store-selection" id="store-selection" style="display:none;">
+    <h2>Select Store</h2>
+    <button onclick="selectStore('store1')">One Stop</button>
+    <button onclick="selectStore('store2')">Golden</button>
+  </div>
+
+  <div class="pos-container" id="pos-container" style="display:none;">
+    <div class="topbar">
+      <h2 id="store-name">Stationery POS</h2>
+      <div class="muted" id="sync-status">Not synced</div>
+    </div>
+
+    <form id="sale-form">
+      <div class="grid2">
+        <div class="form-row"><input type="text" id="item" placeholder="Search Item" list="item-list" required></div>
+        <div class="form-row"><datalist id="item-list"></datalist><select id="unit" required><option value="ct">Carton</option><option value="dz">Dozen</option><option value="pc" selected>Piece</option></select></div>
+        <div class="form-row"><input type="number" id="quantity" step="any" min="0" placeholder="Quantity" required></div>
+        <div class="form-row"><input type="number" id="price" placeholder="Price per item" required readonly></div>
+        <div class="form-row"><input type="number" id="discount" value="0" placeholder="Discount"></div>
+        <div class="form-row"><input type="number" id="extra" value="0" placeholder="Extra charges"></div>
+        <div class="form-row"><select id="payment-method"><option value="Cash">Cash</option><option value="M-Pesa">M-Pesa</option><option value="Card">Card</option><option value="Bank">Bank</option><option value="Credit">Credit</option></select></div>
+        <div class="form-row"><input type="text" id="total" placeholder="Total" readonly /></div>
+      </div>
+      <div class="form-row"><button type="submit">Add to Order</button></div>
+    </form>
+
+    <table id="sales-table">
+      <thead>
+        <tr><th>#</th><th>Item</th><th>Unit</th><th>Qty</th><th>Price</th><th>Discount</th><th>Extra</th><th>Total</th><th>Payment</th><th>Action</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="button-row">
+      <button id="submit-all-btn" onclick="submitAllSales()" style="display:none;">Submit All Items</button>
+      <button id="clear-all-btn" onclick="clearAllSales()" style="display:none;">Clear All Items</button>
+      <button onclick="showStockLevels()">📦 View Stock</button>
+      <button onclick="showStockAdjustment()">📊 Adjust Stock</button>
+      <button onclick="showExpenseModal()">💸 Expense</button>
+      <button onclick="showPurchaseModal()">🛒 Purchase / Stock-In</button>
+    </div>
+  </div>
+
+  <div id="stock-modal" class="modal"><div class="modal-box wide"><div class="modal-head"><h2>Stock Levels</h2><button onclick="hideStockLevels()">Close</button></div><input type="text" id="stock-search" placeholder="Search products..."><div id="stock-table-container"><table><thead><tr><th>Product</th><th>One Stop</th><th>Golden</th><th>Status</th></tr></thead><tbody id="stock-table-body"></tbody></table></div><div id="stock-summary" class="muted"></div></div></div>
+
+  <div id="stock-adjustment-modal" class="modal"><div class="modal-box wide"><div class="modal-head"><h2>Stock Adjustment - <span id="adjustment-store-name"></span></h2><button onclick="hideStockAdjustment()">Close</button></div><div class="form-row"><input type="text" id="adjustment-search" placeholder="Search products to add..." list="item-list"><button type="button" onclick="addItemToAdjustment()">Add Item</button></div><table><thead><tr><th>Product</th><th>Unit</th><th>Adjustment Type</th><th>Quantity</th><th>Action</th></tr></thead><tbody id="adjustment-table-body"></tbody></table><div class="button-row"><span id="adjustment-summary">Items to adjust: 0</span><button onclick="clearAdjustments()">Clear All</button><button onclick="submitStockAdjustment()">Submit Adjustments</button></div></div></div>
+
+  <div id="expense-modal" class="modal"><div class="modal-box"><div class="modal-head"><h2>Daily Expense</h2><button onclick="hideExpenseModal()">Close</button></div><div class="form-row"><label>Category</label><select id="expense-category"><option value="">-- Select --</option><option>Waybill</option><option>Wabebaji</option><option>Chakula</option><option>Umeme</option><option>Maji</option><option>Salary</option><option>Posho</option><option>Ufundi</option><option>Manunuzi ya Vifaa</option><option>Mengineyo</option></select></div><div class="form-row"><label>Description</label><input type="text" id="expense-description"></div><div class="form-row"><label>Amount</label><input type="number" id="expense-amount"></div><div class="form-row"><label>Payment</label><select id="expense-payment"><option value="Cash">Cash</option><option value="M-Pesa">M-Pesa</option><option value="Card">Card</option><option value="Bank">Bank</option></select></div><div class="button-row"><button onclick="submitExpense()">Save Expense</button></div></div></div>
+
+  <div id="purchase-modal" class="modal"><div class="modal-box wide"><div class="modal-head"><h2>Purchase / Stock-In - <span id="purchase-store-name"></span></h2><button onclick="hidePurchaseModal()">Close</button></div><div class="grid2"><div class="form-row"><label>Supplier</label><input type="text" id="purchase-supplier" placeholder="Supplier"></div><div class="form-row"><label>Payment Method</label><select id="purchase-payment"><option value="Cash">Cash</option><option value="M-Pesa">M-Pesa</option><option value="Card">Card</option><option value="Bank">Bank</option><option value="Credit">Credit</option></select></div></div><div class="form-row"><input type="text" id="purchase-search" placeholder="Search products to add..." list="item-list"><button type="button" onclick="addItemToPurchase()">Add Item</button></div><table><thead><tr><th>Product</th><th>Unit</th><th>Qty</th><th>Cost Price</th><th>Total Cost</th><th>Action</th></tr></thead><tbody id="purchase-table-body"></tbody></table><div class="button-row"><span id="purchase-summary">Items to purchase: 0</span><button onclick="clearPurchases()">Clear All</button><button onclick="submitPurchases()">Submit Purchase</button></div></div></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
