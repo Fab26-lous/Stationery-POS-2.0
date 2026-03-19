@@ -16,21 +16,35 @@ let purchaseItems = [];
 function setStatus(message) { document.getElementById('sync-status').textContent = message; }
 function storeName() { return stores[currentStore]?.name || ''; }
 
-// For GET requests (reading data)
-async function apiGet(action, params = {}) {
+// Unified API request function using GET for everything (CORS-friendly for Apps Script)
+async function apiRequest(action, data = {}) {
   const url = new URL(API_BASE_URL);
-  url.searchParams.append('action', action);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null) {
-      url.searchParams.append(k, v);
-    }
-  });
   
-  console.log('GET Request URL:', url.toString());
+  // Add action parameter
+  url.searchParams.append('action', action);
+  
+  // Add store parameter if it exists in data
+  if (data.store) {
+    url.searchParams.append('store', data.store);
+  }
+  
+  // For operations that need data, stringify and add as a parameter
+  if (Object.keys(data).length > 0) {
+    // Remove store from data before stringifying to avoid duplication
+    const dataCopy = { ...data };
+    delete dataCopy.store;
+    if (Object.keys(dataCopy).length > 0) {
+      url.searchParams.append('data', JSON.stringify(dataCopy));
+    }
+  }
+  
+  console.log('Request URL:', url.toString());
+  console.log('Request action:', action);
+  console.log('Request data:', data);
   
   try {
     const response = await fetch(url.toString(), {
-      method: 'GET',
+      method: 'GET', // Always use GET for Apps Script to avoid CORS preflight
       mode: 'cors',
       headers: {
         'Accept': 'application/json',
@@ -41,53 +55,13 @@ async function apiGet(action, params = {}) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    return await response.json();
+    const result = await response.json();
+    console.log('Response:', result);
+    return result;
   } catch (error) {
-    console.error('API GET Error:', error);
+    console.error('API Request Error:', error);
     return { ok: false, error: error.message };
   }
-}
-
-// For POST requests (submitting data) - using JSONP-like approach
-async function apiPost(action, data = {}) {
-  return new Promise((resolve, reject) => {
-    // Create a unique callback name
-    const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
-    
-    // Create a URL with parameters
-    const url = new URL(API_BASE_URL);
-    url.searchParams.append('action', action);
-    url.searchParams.append('data', JSON.stringify(data));
-    url.searchParams.append('callback', callbackName);
-    
-    // Create script element
-    const script = document.createElement('script');
-    script.src = url.toString();
-    
-    // Define callback function
-    window[callbackName] = function(response) {
-      try {
-        // Clean up
-        delete window[callbackName];
-        document.body.removeChild(script);
-        
-        console.log('JSONP Response:', response);
-        resolve(response);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    
-    // Handle errors
-    script.onerror = function() {
-      delete window[callbackName];
-      document.body.removeChild(script);
-      reject(new Error('Network error'));
-    };
-    
-    // Add script to document
-    document.body.appendChild(script);
-  });
 }
 
 function checkLogin() {
@@ -95,10 +69,19 @@ function checkLogin() {
   const password = document.getElementById('password').value;
   const error = document.getElementById('login-error');
   let validStore = null;
+  
   for (const storeId in stores) {
-    if (stores[storeId].users[username] === password) validStore = storeId;
+    if (stores[storeId].users[username] === password) {
+      validStore = storeId;
+      break;
+    }
   }
-  if (!validStore) { error.textContent = 'Invalid username or password'; return; }
+  
+  if (!validStore) { 
+    error.textContent = 'Invalid username or password'; 
+    return; 
+  }
+  
   currentStore = validStore;
   currentUser = username;
   document.getElementById('login-container').style.display = 'none';
@@ -116,8 +99,10 @@ function selectStore(storeId) {
 async function loadProducts() {
   try {
     setStatus('Loading products...');
-    const res = await apiGet('products', { store: storeName() });
+    const res = await apiRequest('products', { store: storeName() });
+    
     if (!res.ok) throw new Error(res.error || 'Failed to load products');
+    
     products = res.data.map(p => ({
       id: p.productId,
       name: p.productName,
@@ -127,6 +112,7 @@ async function loadProducts() {
       stockStore2: Number(p.stockGolden) || 0,
       countingUnit: p.countingUnit || 'pc'
     }));
+    
     populateDatalist();
     setStatus(`Loaded ${products.length} products`);
   } catch (error) {
@@ -166,7 +152,8 @@ function calculateTotal() {
 
 // Add event listeners after DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-  ['quantity','price','discount','extra'].forEach(id => {
+  // Input event listeners
+  ['quantity', 'price', 'discount', 'extra'].forEach(id => {
     const element = document.getElementById(id);
     if (element) element.addEventListener('input', calculateTotal);
   });
@@ -177,12 +164,14 @@ document.addEventListener('DOMContentLoaded', function() {
   const unitSelect = document.getElementById('unit');
   if (unitSelect) unitSelect.addEventListener('change', updatePrice);
   
+  // Sale form submit
   const saleForm = document.getElementById('sale-form');
   if (saleForm) {
     saleForm.addEventListener('submit', function(e) {
       e.preventDefault();
       const item = document.getElementById('item').value.trim();
       if (!item) return alert('Please select an item');
+      
       const sale = {
         item,
         unit: document.getElementById('unit').value,
@@ -194,6 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
         total: calculateTotal(),
         timestamp: new Date().toISOString()
       };
+      
       currentSales.push(sale);
       updateSalesTable();
       resetForm();
@@ -209,41 +199,78 @@ function resetForm() {
 
 function updateSalesTable() {
   const tbody = document.querySelector('#sales-table tbody');
+  if (!tbody) return;
+  
   tbody.innerHTML = '';
   let grandTotal = 0;
+  
   currentSales.forEach((sale, index) => {
     grandTotal += sale.total;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${index+1}</td><td>${sale.item}</td><td>${sale.unit}</td><td>${sale.quantity}</td><td>${sale.price.toFixed(2)}</td><td>${sale.discount.toFixed(2)}</td><td>${sale.extra.toFixed(2)}</td><td>${sale.total.toFixed(2)}</td><td>${sale.paymentMethod}</td><td><button onclick="removeSale(${index})">×</button></td>`;
+    tr.innerHTML = `
+      <td>${index + 1}</td>
+      <td>${sale.item}</td>
+      <td>${sale.unit}</td>
+      <td>${sale.quantity}</td>
+      <td>${sale.price.toFixed(2)}</td>
+      <td>${sale.discount.toFixed(2)}</td>
+      <td>${sale.extra.toFixed(2)}</td>
+      <td>${sale.total.toFixed(2)}</td>
+      <td>${sale.paymentMethod}</td>
+      <td><button onclick="removeSale(${index})">×</button></td>
+    `;
     tbody.appendChild(tr);
   });
+  
   if (currentSales.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="7" style="text-align:right"><strong>Grand Total</strong></td><td><strong>${grandTotal.toFixed(2)}</strong></td><td colspan="2"></td>`;
+    tr.innerHTML = `
+      <td colspan="7" style="text-align:right"><strong>Grand Total</strong></td>
+      <td><strong>${grandTotal.toFixed(2)}</strong></td>
+      <td colspan="2"></td>
+    `;
     tbody.appendChild(tr);
   }
-  document.getElementById('submit-all-btn').style.display = currentSales.length ? 'inline-block' : 'none';
-  document.getElementById('clear-all-btn').style.display = currentSales.length ? 'inline-block' : 'none';
+  
+  const submitBtn = document.getElementById('submit-all-btn');
+  const clearBtn = document.getElementById('clear-all-btn');
+  
+  if (submitBtn) submitBtn.style.display = currentSales.length ? 'inline-block' : 'none';
+  if (clearBtn) clearBtn.style.display = currentSales.length ? 'inline-block' : 'none';
 }
 
-function removeSale(index) { currentSales.splice(index, 1); updateSalesTable(); }
-function clearAllSales() { if (confirm('Clear all items?')) { currentSales = []; updateSalesTable(); } }
+function removeSale(index) { 
+  currentSales.splice(index, 1); 
+  updateSalesTable(); 
+}
+
+function clearAllSales() { 
+  if (confirm('Clear all items?')) { 
+    currentSales = []; 
+    updateSalesTable(); 
+  } 
+}
 
 async function submitAllSales() {
   if (!currentSales.length) return alert('No items to submit');
+  
   try {
     setStatus('Submitting sales...');
-    const res = await apiPost('sales', { 
+    
+    const res = await apiRequest('sales', { 
       store: storeName(), 
       cashier: currentUser, 
-      items: currentSales 
+      items: currentSales,
+      timestamp: new Date().toISOString()
     });
+    
     if (!res.ok) throw new Error(res.error || 'Sales submit failed');
+    
     currentSales = [];
     updateSalesTable();
     setStatus(`Sales synced: ${res.inserted}`);
     alert(`Submitted ${res.inserted} sales line(s)`);
-    loadProducts();
+    loadProducts(); // Refresh stock levels
   } catch (error) {
     console.error(error);
     setStatus('Sales sync failed');
@@ -253,53 +280,84 @@ async function submitAllSales() {
 
 async function showStockLevels() {
   try {
-    const res = await apiGet('stock', {});
+    const res = await apiRequest('stock', {});
     if (!res.ok) return alert('Could not load stock');
+    
     allStoreProducts = res.data;
     populateStockTable(allStoreProducts);
     document.getElementById('stock-modal').style.display = 'flex';
-    document.getElementById('stock-search').oninput = function() {
-      const term = this.value.toLowerCase().trim();
-      populateStockTable(allStoreProducts.filter(p => !term || String(p.productName).toLowerCase().includes(term)));
-    };
+    
+    const searchInput = document.getElementById('stock-search');
+    if (searchInput) {
+      searchInput.oninput = function() {
+        const term = this.value.toLowerCase().trim();
+        populateStockTable(allStoreProducts.filter(p => 
+          !term || String(p.productName).toLowerCase().includes(term)
+        ));
+      };
+    }
   } catch (error) {
     alert('Failed to load stock levels');
   }
 }
 
-function hideStockLevels() { document.getElementById('stock-modal').style.display = 'none'; }
+function hideStockLevels() { 
+  document.getElementById('stock-modal').style.display = 'none'; 
+}
 
 function populateStockTable(list) {
   const tbody = document.getElementById('stock-table-body');
+  if (!tbody) return;
+  
   tbody.innerHTML = '';
   let outCount = 0, lowCount = 0;
+  
   list.forEach(p => {
     const one = Number(p.stockOneStop) || 0;
     const two = Number(p.stockGolden) || 0;
     let label = 'OK', cls = 'status-ok';
-    if (one <= 0 && two <= 0) { label = 'OUT'; cls = 'status-out'; outCount++; }
-    else if (one <= 5 || two <= 5) { label = 'LOW'; cls = 'status-low'; lowCount++; }
+    
+    if (one <= 0 && two <= 0) { 
+      label = 'OUT'; 
+      cls = 'status-out'; 
+      outCount++; 
+    } else if (one <= 5 || two <= 5) { 
+      label = 'LOW'; 
+      cls = 'status-low'; 
+      lowCount++; 
+    }
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${p.productName}</td><td>${one}</td><td>${two}</td><td class="${cls}">${label}</td>`;
     tbody.appendChild(tr);
   });
-  document.getElementById('stock-summary').textContent = `Products: ${list.length} | Out: ${outCount} | Low: ${lowCount}`;
+  
+  const summary = document.getElementById('stock-summary');
+  if (summary) {
+    summary.textContent = `Products: ${list.length} | Out: ${outCount} | Low: ${lowCount}`;
+  }
 }
 
 function showStockAdjustment() {
   adjustmentItems = [];
-  document.getElementById('adjustment-store-name').textContent = storeName();
+  const storeNameEl = document.getElementById('adjustment-store-name');
+  if (storeNameEl) storeNameEl.textContent = storeName();
+  
   updateAdjustmentTable();
   document.getElementById('stock-adjustment-modal').style.display = 'flex';
 }
 
-function hideStockAdjustment() { document.getElementById('stock-adjustment-modal').style.display = 'none'; }
+function hideStockAdjustment() { 
+  document.getElementById('stock-adjustment-modal').style.display = 'none'; 
+}
 
 function addItemToAdjustment() {
   const name = document.getElementById('adjustment-search').value.trim();
   const p = products.find(x => x.name.toLowerCase() === name.toLowerCase());
+  
   if (!p) return alert('Product not found');
   if (adjustmentItems.some(x => x.name === p.name)) return alert('Already added');
+  
   adjustmentItems.push({ name: p.name, unit: 'pc', adjustmentType: 'add', quantity: 0 });
   document.getElementById('adjustment-search').value = '';
   updateAdjustmentTable();
@@ -307,56 +365,76 @@ function addItemToAdjustment() {
 
 function updateAdjustmentTable() {
   const tbody = document.getElementById('adjustment-table-body');
+  if (!tbody) return;
+  
   tbody.innerHTML = '';
+  
   if (!adjustmentItems.length) {
-    tbody.innerHTML = '<tr><td colspan="5">No items added yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">No items added yet</td></tr>';
   } else {
     adjustmentItems.forEach((item, index) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${item.name}</td>
+      tr.innerHTML = `
+        <td>${item.name}</td>
         <td>
           <select onchange="adjustmentItems[${index}].unit=this.value">
-            <option value="pc" ${item.unit==='pc'?'selected':''}>pc</option>
-            <option value="dz" ${item.unit==='dz'?'selected':''}>dz</option>
-            <option value="ct" ${item.unit==='ct'?'selected':''}>ct</option>
+            <option value="pc" ${item.unit === 'pc' ? 'selected' : ''}>pc</option>
+            <option value="dz" ${item.unit === 'dz' ? 'selected' : ''}>dz</option>
+            <option value="ct" ${item.unit === 'ct' ? 'selected' : ''}>ct</option>
           </select>
         </td>
         <td>
           <select onchange="adjustmentItems[${index}].adjustmentType=this.value">
-            <option value="add" ${item.adjustmentType==='add'?'selected':''}>Add</option>
-            <option value="remove" ${item.adjustmentType==='remove'?'selected':''}>Remove</option>
-            <option value="set" ${item.adjustmentType==='set'?'selected':''}>Set</option>
+            <option value="add" ${item.adjustmentType === 'add' ? 'selected' : ''}>Add</option>
+            <option value="remove" ${item.adjustmentType === 'remove' ? 'selected' : ''}>Remove</option>
+            <option value="set" ${item.adjustmentType === 'set' ? 'selected' : ''}>Set</option>
           </select>
         </td>
         <td>
           <input type="number" step="any" value="${item.quantity}" onchange="adjustmentItems[${index}].quantity=Number(this.value||0)">
         </td>
-        <td><button onclick="removeAdjustmentItem(${index})">Remove</button></td>`;
+        <td><button onclick="removeAdjustmentItem(${index})">Remove</button></td>
+      `;
       tbody.appendChild(tr);
     });
   }
-  document.getElementById('adjustment-summary').textContent = `Items to adjust: ${adjustmentItems.length}`;
+  
+  const summary = document.getElementById('adjustment-summary');
+  if (summary) {
+    summary.textContent = `Items to adjust: ${adjustmentItems.length}`;
+  }
 }
 
-function removeAdjustmentItem(index) { adjustmentItems.splice(index,1); updateAdjustmentTable(); }
-function clearAdjustments() { adjustmentItems = []; updateAdjustmentTable(); }
+function removeAdjustmentItem(index) { 
+  adjustmentItems.splice(index, 1); 
+  updateAdjustmentTable(); 
+}
+
+function clearAdjustments() { 
+  adjustmentItems = []; 
+  updateAdjustmentTable(); 
+}
 
 async function submitStockAdjustment() {
   if (!adjustmentItems.length) return alert('No adjustment items');
+  
   try {
     setStatus('Submitting adjustments...');
-    const res = await apiPost('adjustments', { 
+    
+    const res = await apiRequest('adjustments', { 
       store: storeName(), 
       items: adjustmentItems, 
       timestamp: new Date().toISOString() 
     });
+    
     if (!res.ok) throw new Error(res.error || 'Adjustment submit failed');
+    
     alert(`Submitted ${res.inserted} adjustment(s)`);
     adjustmentItems = [];
     updateAdjustmentTable();
     hideStockAdjustment();
     setStatus(`Adjustments synced: ${res.inserted}`);
-    loadProducts();
+    loadProducts(); // Refresh stock levels
   } catch (error) {
     console.error(error);
     setStatus('Adjustment sync failed');
@@ -364,8 +442,13 @@ async function submitStockAdjustment() {
   }
 }
 
-function showExpenseModal() { document.getElementById('expense-modal').style.display = 'flex'; }
-function hideExpenseModal() { document.getElementById('expense-modal').style.display = 'none'; }
+function showExpenseModal() { 
+  document.getElementById('expense-modal').style.display = 'flex'; 
+}
+
+function hideExpenseModal() { 
+  document.getElementById('expense-modal').style.display = 'none'; 
+}
 
 async function submitExpense() {
   try {
@@ -378,8 +461,11 @@ async function submitExpense() {
       paymentMethod: document.getElementById('expense-payment').value,
       timestamp: new Date().toISOString()
     };
-    const res = await apiPost('cashout', payload);
+    
+    const res = await apiRequest('cashout', payload);
+    
     if (!res.ok) throw new Error(res.error || 'Expense submit failed');
+    
     alert('Expense recorded');
     hideExpenseModal();
     setStatus('Expense synced');
@@ -392,18 +478,24 @@ async function submitExpense() {
 
 function showPurchaseModal() {
   purchaseItems = [];
-  document.getElementById('purchase-store-name').textContent = storeName();
+  const storeNameEl = document.getElementById('purchase-store-name');
+  if (storeNameEl) storeNameEl.textContent = storeName();
+  
   updatePurchaseTable();
   document.getElementById('purchase-modal').style.display = 'flex';
 }
 
-function hidePurchaseModal() { document.getElementById('purchase-modal').style.display = 'none'; }
+function hidePurchaseModal() { 
+  document.getElementById('purchase-modal').style.display = 'none'; 
+}
 
 function addItemToPurchase() {
   const name = document.getElementById('purchase-search').value.trim();
   const p = products.find(x => x.name.toLowerCase() === name.toLowerCase());
+  
   if (!p) return alert('Product not found');
   if (purchaseItems.some(x => x.item === p.name)) return alert('Already added');
+  
   purchaseItems.push({ item: p.name, unit: 'pc', quantity: 0, costPrice: 0, totalCost: 0 });
   document.getElementById('purchase-search').value = '';
   updatePurchaseTable();
@@ -411,18 +503,22 @@ function addItemToPurchase() {
 
 function updatePurchaseTable() {
   const tbody = document.getElementById('purchase-table-body');
+  if (!tbody) return;
+  
   tbody.innerHTML = '';
+  
   if (!purchaseItems.length) {
-    tbody.innerHTML = '<tr><td colspan="6">No items added yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">No items added yet</td></tr>';
   } else {
     purchaseItems.forEach((item, index) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${item.item}</td>
+      tr.innerHTML = `
+        <td>${item.item}</td>
         <td>
           <select onchange="purchaseItems[${index}].unit=this.value">
-            <option value="pc" ${item.unit==='pc'?'selected':''}>pc</option>
-            <option value="dz" ${item.unit==='dz'?'selected':''}>dz</option>
-            <option value="ct" ${item.unit==='ct'?'selected':''}>ct</option>
+            <option value="pc" ${item.unit === 'pc' ? 'selected' : ''}>pc</option>
+            <option value="dz" ${item.unit === 'dz' ? 'selected' : ''}>dz</option>
+            <option value="ct" ${item.unit === 'ct' ? 'selected' : ''}>ct</option>
           </select>
         </td>
         <td>
@@ -431,29 +527,43 @@ function updatePurchaseTable() {
         <td>
           <input type="number" step="any" value="${item.costPrice}" onchange="purchaseItems[${index}].costPrice=Number(this.value||0);recalcPurchase(${index})">
         </td>
-        <td id="purchase-total-${index}">${(item.totalCost||0).toFixed(2)}</td>
-        <td><button onclick="removePurchaseItem(${index})">Remove</button></td>`;
+        <td id="purchase-total-${index}">${(item.totalCost || 0).toFixed(2)}</td>
+        <td><button onclick="removePurchaseItem(${index})">Remove</button></td>
+      `;
       tbody.appendChild(tr);
     });
   }
-  document.getElementById('purchase-summary').textContent = `Items to purchase: ${purchaseItems.length}`;
+  
+  const summary = document.getElementById('purchase-summary');
+  if (summary) {
+    summary.textContent = `Items to purchase: ${purchaseItems.length}`;
+  }
 }
 
 function recalcPurchase(index) {
   const item = purchaseItems[index];
-  item.totalCost = (Number(item.quantity)||0) * (Number(item.costPrice)||0);
+  item.totalCost = (Number(item.quantity) || 0) * (Number(item.costPrice) || 0);
   const cell = document.getElementById(`purchase-total-${index}`);
   if (cell) cell.textContent = item.totalCost.toFixed(2);
 }
 
-function removePurchaseItem(index) { purchaseItems.splice(index,1); updatePurchaseTable(); }
-function clearPurchases() { purchaseItems = []; updatePurchaseTable(); }
+function removePurchaseItem(index) { 
+  purchaseItems.splice(index, 1); 
+  updatePurchaseTable(); 
+}
+
+function clearPurchases() { 
+  purchaseItems = []; 
+  updatePurchaseTable(); 
+}
 
 async function submitPurchases() {
   if (!purchaseItems.length) return alert('No purchase items');
+  
   try {
-    const totalSpend = purchaseItems.reduce((s, x) => s + ((Number(x.quantity)||0)*(Number(x.costPrice)||0)), 0);
-    const res = await apiPost('purchase', {
+    const totalSpend = purchaseItems.reduce((s, x) => s + ((Number(x.quantity) || 0) * (Number(x.costPrice) || 0)), 0);
+    
+    const res = await apiRequest('purchase', {
       store: storeName(),
       supplier: document.getElementById('purchase-supplier').value,
       paymentMethod: document.getElementById('purchase-payment').value,
@@ -461,13 +571,15 @@ async function submitPurchases() {
       totalSpend,
       timestamp: new Date().toISOString()
     });
+    
     if (!res.ok) throw new Error(res.error || 'Purchase submit failed');
+    
     alert(`Submitted ${res.inserted} purchase line(s)`);
     purchaseItems = [];
     updatePurchaseTable();
     hidePurchaseModal();
     setStatus(`Purchases synced: ${res.inserted}`);
-    loadProducts();
+    loadProducts(); // Refresh stock levels
   } catch (error) {
     console.error(error);
     setStatus('Purchase sync failed');
