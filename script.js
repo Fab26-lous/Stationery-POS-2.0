@@ -23,7 +23,7 @@ async function apiRequest(action, data = {}) {
     let response;
 
     if (readActions.includes(action)) {
-      const url = new URL(API_BASE_URL);
+      const url = new URL(POS_API_URL);
       url.searchParams.set('action', action);
 
       if (data.store) {
