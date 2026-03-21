@@ -5,16 +5,66 @@ const stores = {
   store2: { name: 'Golden', users: { Cashier2: 'Glam2025' } }
 };
 
+const LOCAL_QUEUE_KEY = 'stationery_pos_sync_queue_v2';
+
 let currentStore = null;
 let currentUser = null;
 let products = [];
 let currentSales = [];
 let allStoreProducts = [];
 let adjustmentItems = [];
-let purchaseItems = [];
+let isSyncing = false;
 
-function setStatus(message) { document.getElementById('sync-status').textContent = message; }
-function storeName() { return stores[currentStore]?.name || ''; }
+function setStatus(message, type = 'info') {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'sync-status ' + type;
+}
+
+function storeName() {
+  return stores[currentStore]?.name || '';
+}
+
+function generateId() {
+  return 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function getQueue() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_QUEUE_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveQueue(queue) {
+  localStorage.setItem(LOCAL_QUEUE_KEY, JSON.stringify(queue));
+  updatePendingBadge();
+}
+
+function addToQueue(action, payload) {
+  const queue = getQueue();
+  queue.push({
+    id: generateId(),
+    action,
+    payload,
+    createdAt: new Date().toISOString(),
+    status: 'pending'
+  });
+  saveQueue(queue);
+}
+
+function removeFromQueue(id) {
+  const queue = getQueue().filter(item => item.id !== id);
+  saveQueue(queue);
+}
+
+function updatePendingBadge() {
+  const el = document.getElementById('pending-count');
+  if (!el) return;
+  el.textContent = getQueue().length;
+}
 
 async function apiRequest(action, data = {}) {
   const readActions = ['health', 'products', 'stock'];
@@ -37,10 +87,7 @@ async function apiRequest(action, data = {}) {
         }
       });
     } else {
-      const payload = {
-        action,
-        ...data
-      };
+      const payload = { action, ...data };
 
       response = await fetch(POS_API_URL, {
         method: 'POST',
@@ -71,106 +118,155 @@ async function apiRequest(action, data = {}) {
   }
 }
 
+async function processQueue() {
+  if (isSyncing) return;
+
+  const queue = getQueue();
+  if (!queue.length) {
+    setStatus('Ready', 'success');
+    return;
+  }
+
+  isSyncing = true;
+
+  try {
+    setStatus(`Syncing ${queue.length} pending item(s)...`, 'warning');
+
+    for (const job of queue) {
+      const result = await apiRequest(job.action, job.payload);
+
+      if (result.ok) {
+        removeFromQueue(job.id);
+      } else {
+        console.error('Queue sync failed:', job, result);
+        setStatus(`${getQueue().length} pending. Sync will retry automatically.`, 'error');
+        isSyncing = false;
+        return;
+      }
+    }
+
+    updatePendingBadge();
+    setStatus('All pending data synced successfully', 'success');
+
+    if (currentStore) {
+      loadProducts();
+    }
+  } finally {
+    isSyncing = false;
+  }
+}
+
+function queueAndSync(action, payload, successMessage) {
+  addToQueue(action, payload);
+  setStatus(successMessage + ' Saved locally.', 'success');
+  setTimeout(processQueue, 120);
+}
+
+function showSection(id) {
+  ['login-container', 'store-selection', 'pos-container'].forEach(sectionId => {
+    const el = document.getElementById(sectionId);
+    if (!el) return;
+    if (sectionId === id) {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  });
+}
+
 function checkLogin() {
-  const username = document.getElementById('username').value;
+  const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
   const error = document.getElementById('login-error');
   let validStore = null;
-  
+
+  error.textContent = '';
+
   for (const storeId in stores) {
     if (stores[storeId].users[username] === password) {
       validStore = storeId;
       break;
     }
   }
-  
-  if (!validStore) { 
-    error.textContent = 'Invalid username or password'; 
-    return; 
+
+  if (!validStore) {
+    error.textContent = 'Invalid username or password';
+    setStatus('Login failed', 'error');
+    return;
   }
-  
+
   currentStore = validStore;
   currentUser = username;
-  document.getElementById('login-container').style.display = 'none';
-  document.getElementById('store-selection').style.display = 'block';
+  showSection('store-selection');
+  setStatus('Login successful. Select your store.', 'success');
 }
 
 function selectStore(storeId) {
-  if (storeId !== currentStore) return alert('You are not authorized for this store');
-  document.getElementById('store-selection').style.display = 'none';
-  document.getElementById('pos-container').style.display = 'block';
+  if (storeId !== currentStore) {
+    setStatus('You are not authorized for this store', 'error');
+    return;
+  }
+
+  showSection('pos-container');
   document.getElementById('store-name').textContent = stores[storeId].name + ' POS';
   loadProducts();
+  processQueue();
 }
 
 async function loadProducts() {
   try {
-    setStatus('Loading products...');
-    
-    const store = storeName();
-    console.log('Loading products for store:', store);
-    
-    const res = await apiRequest('products', { store: store });
-    
-    // Enhanced logging
-    console.log('API Response:', JSON.stringify(res, null, 2));
-    
-    if (!res) {
-      throw new Error('No response from API');
+    setStatus('Loading products...', 'warning');
+
+    const res = await apiRequest('products', { store: storeName() });
+
+    if (!res || !res.ok) {
+      throw new Error(res?.error || 'Failed to load products');
     }
-    
-    if (!res.ok) {
-      console.error('API returned not ok:', res);
-      throw new Error(res.error || 'Failed to load products');
-    }
-    
-    if (!res.data) {
-      console.error('No data in response:', res);
-      throw new Error('API returned no data');
-    }
-    
+
     if (!Array.isArray(res.data)) {
-      console.error('Data is not an array:', typeof res.data);
-      throw new Error('API returned invalid data structure');
+      throw new Error('Invalid product feed');
     }
-    
-    if (res.data.length === 0) {
-      console.warn('API returned empty product list');
-      setStatus('No products found in the feed');
-      products = [];
-      populateDatalist();
-      return;
-    }
-    
-    console.log('First product sample:', res.data[0]);
-    
+
     products = res.data.map(p => ({
       id: p.productId,
       name: p.productName,
-      prices: { 
-        ct: Number(p.priceCt) || 0, 
-        dz: Number(p.priceDz) || 0, 
-        pc: Number(p.pricePc) || 0 
+      prices: {
+        ct: Number(p.priceCt) || 0,
+        dz: Number(p.priceDz) || 0,
+        pc: Number(p.pricePc) || 0
       },
       stock: Number(p.stock) || 0,
       stockStore1: Number(p.stockOneStop) || 0,
       stockStore2: Number(p.stockGolden) || 0,
       countingUnit: p.countingUnit || 'pc'
     }));
-    
-    console.log(`Successfully loaded ${products.length} products`);
-    populateDatalist();
-    setStatus(`Loaded ${products.length} products`);
-    
+
+    populateSalesDatalist();
+    populateAdjustmentDatalist();
+    setStatus(`Loaded ${products.length} products`, 'success');
   } catch (error) {
-    console.error('Error in loadProducts:', error);
-    setStatus('Sync failed: ' + error.message);
-    alert('Failed to load product feed from Apps Script\n\nError: ' + error.message + '\n\nCheck console for details');
+    console.error('loadProducts error:', error);
+    setStatus('Failed to load products: ' + error.message, 'error');
   }
 }
-function populateDatalist() {
+
+function populateSalesDatalist() {
   const dl = document.getElementById('item-list');
+  if (!dl) return;
   dl.innerHTML = '';
+
+  products.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.name;
+    dl.appendChild(opt);
+  });
+}
+
+function populateAdjustmentDatalist() {
+  const dl = document.getElementById('adjustment-item-list');
+  if (!dl) return;
+  dl.innerHTML = '';
+
   products.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p.name;
@@ -182,6 +278,7 @@ function updatePrice() {
   const itemName = document.getElementById('item').value.trim().toLowerCase();
   const unit = document.getElementById('unit').value;
   const product = products.find(p => p.name.toLowerCase() === itemName);
+
   document.getElementById('price').value = product ? (product.prices[unit] || 0) : '';
   calculateTotal();
 }
@@ -196,47 +293,6 @@ function calculateTotal() {
   return total;
 }
 
-// Add event listeners after DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-  // Input event listeners
-  ['quantity', 'price', 'discount', 'extra'].forEach(id => {
-    const element = document.getElementById(id);
-    if (element) element.addEventListener('input', calculateTotal);
-  });
-  
-  const itemInput = document.getElementById('item');
-  if (itemInput) itemInput.addEventListener('input', updatePrice);
-  
-  const unitSelect = document.getElementById('unit');
-  if (unitSelect) unitSelect.addEventListener('change', updatePrice);
-  
-  // Sale form submit
-  const saleForm = document.getElementById('sale-form');
-  if (saleForm) {
-    saleForm.addEventListener('submit', function(e) {
-      e.preventDefault();
-      const item = document.getElementById('item').value.trim();
-      if (!item) return alert('Please select an item');
-      
-      const sale = {
-        item,
-        unit: document.getElementById('unit').value,
-        quantity: parseFloat(document.getElementById('quantity').value) || 0,
-        price: parseFloat(document.getElementById('price').value) || 0,
-        discount: parseFloat(document.getElementById('discount').value) || 0,
-        extra: parseFloat(document.getElementById('extra').value) || 0,
-        paymentMethod: document.getElementById('payment-method').value,
-        total: calculateTotal(),
-        timestamp: new Date().toISOString()
-      };
-      
-      currentSales.push(sale);
-      updateSalesTable();
-      resetForm();
-    });
-  }
-});
-
 function resetForm() {
   document.getElementById('sale-form').reset();
   document.getElementById('price').value = '';
@@ -246,138 +302,153 @@ function resetForm() {
 function updateSalesTable() {
   const tbody = document.querySelector('#sales-table tbody');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '';
-  let grandTotal = 0;
-  
-  currentSales.forEach((sale, index) => {
-    grandTotal += sale.total;
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${index + 1}</td>
-      <td>${sale.item}</td>
-      <td>${sale.unit}</td>
-      <td>${sale.quantity}</td>
-      <td>${sale.price.toFixed(2)}</td>
-      <td>${sale.discount.toFixed(2)}</td>
-      <td>${sale.extra.toFixed(2)}</td>
-      <td>${sale.total.toFixed(2)}</td>
-      <td>${sale.paymentMethod}</td>
-      <td><button onclick="removeSale(${index})">×</button></td>
-    `;
-    tbody.appendChild(tr);
-  });
-  
-  if (currentSales.length) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td colspan="7" style="text-align:right"><strong>Grand Total</strong></td>
+
+  if (!currentSales.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="muted">No items added yet</td></tr>';
+  } else {
+    let grandTotal = 0;
+
+    currentSales.forEach((sale, index) => {
+      grandTotal += sale.total;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${index + 1}</td>
+        <td>${sale.item}</td>
+        <td>${sale.unit}</td>
+        <td>${sale.quantity}</td>
+        <td>${sale.price.toFixed(2)}</td>
+        <td>${sale.discount.toFixed(2)}</td>
+        <td>${sale.extra.toFixed(2)}</td>
+        <td>${sale.total.toFixed(2)}</td>
+        <td>${sale.paymentMethod}</td>
+        <td><button class="btn btn-mini" onclick="removeSale(${index})">×</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    const totalRow = document.createElement('tr');
+    totalRow.innerHTML = `
+      <td colspan="7" style="text-align:right;"><strong>Grand Total</strong></td>
       <td><strong>${grandTotal.toFixed(2)}</strong></td>
       <td colspan="2"></td>
     `;
-    tbody.appendChild(tr);
+    tbody.appendChild(totalRow);
   }
-  
+
   const submitBtn = document.getElementById('submit-all-btn');
   const clearBtn = document.getElementById('clear-all-btn');
-  
-  if (submitBtn) submitBtn.style.display = currentSales.length ? 'inline-block' : 'none';
-  if (clearBtn) clearBtn.style.display = currentSales.length ? 'inline-block' : 'none';
-}
 
-function removeSale(index) { 
-  currentSales.splice(index, 1); 
-  updateSalesTable(); 
-}
-
-function clearAllSales() { 
-  if (confirm('Clear all items?')) { 
-    currentSales = []; 
-    updateSalesTable(); 
-  } 
-}
-
-async function submitAllSales() {
-  if (!currentSales.length) return alert('No items to submit');
-  
-  try {
-    setStatus('Submitting sales...');
-    
-    const res = await apiRequest('sales', { 
-      store: storeName(), 
-      cashier: currentUser, 
-      items: currentSales,
-      timestamp: new Date().toISOString()
-    });
-    
-    if (!res.ok) throw new Error(res.error || 'Sales submit failed');
-    
-    currentSales = [];
-    updateSalesTable();
-    setStatus(`Sales synced: ${res.inserted}`);
-    alert(`Submitted ${res.inserted} sales line(s)`);
-    loadProducts(); // Refresh stock levels
-  } catch (error) {
-    console.error(error);
-    setStatus('Sales sync failed');
-    alert('Sales submission failed: ' + error.message);
+  if (submitBtn) {
+    submitBtn.classList.toggle('hidden', !currentSales.length);
   }
+
+  if (clearBtn) {
+    clearBtn.classList.toggle('hidden', !currentSales.length);
+  }
+}
+
+function removeSale(index) {
+  currentSales.splice(index, 1);
+  updateSalesTable();
+  setStatus('Item removed from current sale', 'warning');
+}
+
+function clearAllSales() {
+  currentSales = [];
+  updateSalesTable();
+  setStatus('Current sale cleared', 'warning');
+}
+
+function submitAllSales() {
+  if (!currentSales.length) {
+    setStatus('No items to submit', 'error');
+    return;
+  }
+
+  const payload = {
+    store: storeName(),
+    cashier: currentUser,
+    items: currentSales,
+    timestamp: new Date().toISOString()
+  };
+
+  const count = currentSales.length;
+  currentSales = [];
+  updateSalesTable();
+
+  queueAndSync('sales', payload, `${count} sales line(s) queued.`);
 }
 
 async function showStockLevels() {
   try {
     const res = await apiRequest('stock', {});
-    if (!res.ok) return alert('Could not load stock');
-    
-    allStoreProducts = res.data;
+    if (!res.ok) {
+      setStatus('Could not load stock', 'error');
+      return;
+    }
+
+    allStoreProducts = res.data || [];
     populateStockTable(allStoreProducts);
     document.getElementById('stock-modal').style.display = 'flex';
-    
+
     const searchInput = document.getElementById('stock-search');
     if (searchInput) {
-      searchInput.oninput = function() {
+      searchInput.value = '';
+      searchInput.oninput = function () {
         const term = this.value.toLowerCase().trim();
-        populateStockTable(allStoreProducts.filter(p => 
+        const filtered = allStoreProducts.filter(p =>
           !term || String(p.productName).toLowerCase().includes(term)
-        ));
+        );
+        populateStockTable(filtered);
       };
     }
   } catch (error) {
-    alert('Failed to load stock levels');
+    console.error(error);
+    setStatus('Failed to load stock levels', 'error');
   }
 }
 
-function hideStockLevels() { 
-  document.getElementById('stock-modal').style.display = 'none'; 
+function hideStockLevels() {
+  document.getElementById('stock-modal').style.display = 'none';
 }
 
 function populateStockTable(list) {
   const tbody = document.getElementById('stock-table-body');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '';
-  let outCount = 0, lowCount = 0;
-  
+
+  let outCount = 0;
+  let lowCount = 0;
+
   list.forEach(p => {
     const one = Number(p.stockOneStop) || 0;
     const two = Number(p.stockGolden) || 0;
-    let label = 'OK', cls = 'status-ok';
-    
-    if (one <= 0 && two <= 0) { 
-      label = 'OUT'; 
-      cls = 'status-out'; 
-      outCount++; 
-    } else if (one <= 5 || two <= 5) { 
-      label = 'LOW'; 
-      cls = 'status-low'; 
-      lowCount++; 
+    let label = 'OK';
+    let cls = 'status-ok';
+
+    if (one <= 0 && two <= 0) {
+      label = 'OUT';
+      cls = 'status-out';
+      outCount++;
+    } else if (one <= 5 || two <= 5) {
+      label = 'LOW';
+      cls = 'status-low';
+      lowCount++;
     }
-    
+
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${p.productName}</td><td>${one}</td><td>${two}</td><td class="${cls}">${label}</td>`;
+    tr.innerHTML = `
+      <td>${p.productName}</td>
+      <td>${one}</td>
+      <td>${two}</td>
+      <td class="${cls}">${label}</td>
+    `;
     tbody.appendChild(tr);
   });
-  
+
   const summary = document.getElementById('stock-summary');
   if (summary) {
     summary.textContent = `Products: ${list.length} | Out: ${outCount} | Low: ${lowCount}`;
@@ -386,37 +457,55 @@ function populateStockTable(list) {
 
 function showStockAdjustment() {
   adjustmentItems = [];
-  const storeNameEl = document.getElementById('adjustment-store-name');
-  if (storeNameEl) storeNameEl.textContent = storeName();
-  
+  document.getElementById('adjustment-store-name').textContent = storeName();
   updateAdjustmentTable();
   document.getElementById('stock-adjustment-modal').style.display = 'flex';
+
+  const input = document.getElementById('adjustment-search');
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
 }
 
-function hideStockAdjustment() { 
-  document.getElementById('stock-adjustment-modal').style.display = 'none'; 
+function hideStockAdjustment() {
+  document.getElementById('stock-adjustment-modal').style.display = 'none';
 }
 
 function addItemToAdjustment() {
   const name = document.getElementById('adjustment-search').value.trim();
   const p = products.find(x => x.name.toLowerCase() === name.toLowerCase());
-  
-  if (!p) return alert('Product not found');
-  if (adjustmentItems.some(x => x.name === p.name)) return alert('Already added');
-  
-  adjustmentItems.push({ name: p.name, unit: 'pc', adjustmentType: 'add', quantity: 0 });
+
+  if (!p) {
+    setStatus('Product not found', 'error');
+    return;
+  }
+
+  if (adjustmentItems.some(x => x.name === p.name)) {
+    setStatus('Item already added', 'warning');
+    return;
+  }
+
+  adjustmentItems.push({
+    name: p.name,
+    unit: 'pc',
+    adjustmentType: 'add',
+    quantity: 0
+  });
+
   document.getElementById('adjustment-search').value = '';
   updateAdjustmentTable();
+  setStatus('Item added to stock adjustment', 'success');
 }
 
 function updateAdjustmentTable() {
   const tbody = document.getElementById('adjustment-table-body');
   if (!tbody) return;
-  
+
   tbody.innerHTML = '';
-  
+
   if (!adjustmentItems.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">No items added yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">No items added yet</td></tr>';
   } else {
     adjustmentItems.forEach((item, index) => {
       const tr = document.createElement('tr');
@@ -437,203 +526,136 @@ function updateAdjustmentTable() {
           </select>
         </td>
         <td>
-          <input type="number" step="any" value="${item.quantity}" onchange="adjustmentItems[${index}].quantity=Number(this.value||0)">
+          <input type="number" step="any" min="0" value="${item.quantity}" onchange="adjustmentItems[${index}].quantity=Number(this.value||0)">
         </td>
-        <td><button onclick="removeAdjustmentItem(${index})">Remove</button></td>
+        <td>
+          <button class="btn btn-mini" onclick="removeAdjustmentItem(${index})">Remove</button>
+        </td>
       `;
       tbody.appendChild(tr);
     });
   }
-  
+
   const summary = document.getElementById('adjustment-summary');
   if (summary) {
     summary.textContent = `Items to adjust: ${adjustmentItems.length}`;
   }
 }
 
-function removeAdjustmentItem(index) { 
-  adjustmentItems.splice(index, 1); 
-  updateAdjustmentTable(); 
+function removeAdjustmentItem(index) {
+  adjustmentItems.splice(index, 1);
+  updateAdjustmentTable();
+  setStatus('Adjustment item removed', 'warning');
 }
 
-function clearAdjustments() { 
-  adjustmentItems = []; 
-  updateAdjustmentTable(); 
+function clearAdjustments() {
+  adjustmentItems = [];
+  updateAdjustmentTable();
+  setStatus('Adjustment list cleared', 'warning');
 }
 
-async function submitStockAdjustment() {
-  if (!adjustmentItems.length) return alert('No adjustment items');
-  
-  try {
-    setStatus('Submitting adjustments...');
-    
-    const res = await apiRequest('adjustments', { 
-      store: storeName(), 
-      items: adjustmentItems, 
-      timestamp: new Date().toISOString() 
-    });
-    
-    if (!res.ok) throw new Error(res.error || 'Adjustment submit failed');
-    
-    alert(`Submitted ${res.inserted} adjustment(s)`);
-    adjustmentItems = [];
-    updateAdjustmentTable();
-    hideStockAdjustment();
-    setStatus(`Adjustments synced: ${res.inserted}`);
-    loadProducts(); // Refresh stock levels
-  } catch (error) {
-    console.error(error);
-    setStatus('Adjustment sync failed');
-    alert('Adjustment submission failed: ' + error.message);
+function submitStockAdjustment() {
+  if (!adjustmentItems.length) {
+    setStatus('No adjustment items', 'error');
+    return;
   }
+
+  const payload = {
+    store: storeName(),
+    items: adjustmentItems,
+    timestamp: new Date().toISOString()
+  };
+
+  const count = adjustmentItems.length;
+  adjustmentItems = [];
+  updateAdjustmentTable();
+  hideStockAdjustment();
+
+  queueAndSync('adjustments', payload, `${count} adjustment(s) queued.`);
 }
 
-function showExpenseModal() { 
-  document.getElementById('expense-modal').style.display = 'flex'; 
+function showExpenseModal() {
+  document.getElementById('expense-modal').style.display = 'flex';
 }
 
-function hideExpenseModal() { 
-  document.getElementById('expense-modal').style.display = 'none'; 
+function hideExpenseModal() {
+  document.getElementById('expense-modal').style.display = 'none';
 }
 
-async function submitExpense() {
-  try {
-    const payload = {
-      store: storeName(),
-      cashoutType: 'Operating_Expense',
-      category: document.getElementById('expense-category').value,
-      description: document.getElementById('expense-description').value,
-      amount: Number(document.getElementById('expense-amount').value || 0),
-      paymentMethod: document.getElementById('expense-payment').value,
-      timestamp: new Date().toISOString()
-    };
-    
-    const res = await apiRequest('cashout', payload);
-    
-    if (!res.ok) throw new Error(res.error || 'Expense submit failed');
-    
-    alert('Expense recorded');
-    hideExpenseModal();
-    setStatus('Expense synced');
-  } catch (error) {
-    console.error(error);
-    setStatus('Expense sync failed');
-    alert('Expense submission failed: ' + error.message);
+function submitExpense() {
+  const payload = {
+    store: storeName(),
+    cashoutType: 'Operating_Expense',
+    category: document.getElementById('expense-category').value.trim(),
+    description: document.getElementById('expense-description').value.trim(),
+    amount: Number(document.getElementById('expense-amount').value || 0),
+    paymentMethod: document.getElementById('expense-payment').value,
+    timestamp: new Date().toISOString()
+  };
+
+  if (!payload.category || !payload.amount) {
+    setStatus('Expense category and amount are required', 'error');
+    return;
   }
+
+  document.getElementById('expense-category').value = '';
+  document.getElementById('expense-description').value = '';
+  document.getElementById('expense-amount').value = '';
+  document.getElementById('expense-payment').value = 'Cash';
+
+  hideExpenseModal();
+  queueAndSync('cashout', payload, 'Expense queued.');
 }
 
-function showPurchaseModal() {
-  purchaseItems = [];
-  const storeNameEl = document.getElementById('purchase-store-name');
-  if (storeNameEl) storeNameEl.textContent = storeName();
-  
-  updatePurchaseTable();
-  document.getElementById('purchase-modal').style.display = 'flex';
-}
+document.addEventListener('DOMContentLoaded', function () {
+  showSection('login-container');
+  updatePendingBadge();
 
-function hidePurchaseModal() { 
-  document.getElementById('purchase-modal').style.display = 'none'; 
-}
+  ['quantity', 'price', 'discount', 'extra'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.addEventListener('input', calculateTotal);
+  });
 
-function addItemToPurchase() {
-  const name = document.getElementById('purchase-search').value.trim();
-  const p = products.find(x => x.name.toLowerCase() === name.toLowerCase());
-  
-  if (!p) return alert('Product not found');
-  if (purchaseItems.some(x => x.item === p.name)) return alert('Already added');
-  
-  purchaseItems.push({ item: p.name, unit: 'pc', quantity: 0, costPrice: 0, totalCost: 0 });
-  document.getElementById('purchase-search').value = '';
-  updatePurchaseTable();
-}
+  const itemInput = document.getElementById('item');
+  if (itemInput) itemInput.addEventListener('input', updatePrice);
 
-function updatePurchaseTable() {
-  const tbody = document.getElementById('purchase-table-body');
-  if (!tbody) return;
-  
-  tbody.innerHTML = '';
-  
-  if (!purchaseItems.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">No items added yet</td></tr>';
-  } else {
-    purchaseItems.forEach((item, index) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${item.item}</td>
-        <td>
-          <select onchange="purchaseItems[${index}].unit=this.value">
-            <option value="pc" ${item.unit === 'pc' ? 'selected' : ''}>pc</option>
-            <option value="dz" ${item.unit === 'dz' ? 'selected' : ''}>dz</option>
-            <option value="ct" ${item.unit === 'ct' ? 'selected' : ''}>ct</option>
-          </select>
-        </td>
-        <td>
-          <input type="number" step="any" value="${item.quantity}" onchange="purchaseItems[${index}].quantity=Number(this.value||0);recalcPurchase(${index})">
-        </td>
-        <td>
-          <input type="number" step="any" value="${item.costPrice}" onchange="purchaseItems[${index}].costPrice=Number(this.value||0);recalcPurchase(${index})">
-        </td>
-        <td id="purchase-total-${index}">${(item.totalCost || 0).toFixed(2)}</td>
-        <td><button onclick="removePurchaseItem(${index})">Remove</button></td>
-      `;
-      tbody.appendChild(tr);
+  const unitSelect = document.getElementById('unit');
+  if (unitSelect) unitSelect.addEventListener('change', updatePrice);
+
+  const saleForm = document.getElementById('sale-form');
+  if (saleForm) {
+    saleForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      const item = document.getElementById('item').value.trim();
+      if (!item) {
+        setStatus('Please select an item', 'error');
+        return;
+      }
+
+      const sale = {
+        item,
+        unit: document.getElementById('unit').value,
+        quantity: parseFloat(document.getElementById('quantity').value) || 0,
+        price: parseFloat(document.getElementById('price').value) || 0,
+        discount: parseFloat(document.getElementById('discount').value) || 0,
+        extra: parseFloat(document.getElementById('extra').value) || 0,
+        paymentMethod: document.getElementById('payment-method').value,
+        total: calculateTotal(),
+        timestamp: new Date().toISOString()
+      };
+
+      currentSales.push(sale);
+      updateSalesTable();
+      resetForm();
+      setStatus('Item added to current sale', 'success');
     });
   }
-  
-  const summary = document.getElementById('purchase-summary');
-  if (summary) {
-    summary.textContent = `Items to purchase: ${purchaseItems.length}`;
-  }
-}
 
-function recalcPurchase(index) {
-  const item = purchaseItems[index];
-  item.totalCost = (Number(item.quantity) || 0) * (Number(item.costPrice) || 0);
-  const cell = document.getElementById(`purchase-total-${index}`);
-  if (cell) cell.textContent = item.totalCost.toFixed(2);
-}
+  setInterval(processQueue, 8000);
+  window.addEventListener('online', processQueue);
+});
 
-function removePurchaseItem(index) { 
-  purchaseItems.splice(index, 1); 
-  updatePurchaseTable(); 
-}
-
-function clearPurchases() { 
-  purchaseItems = []; 
-  updatePurchaseTable(); 
-}
-
-async function submitPurchases() {
-  if (!purchaseItems.length) return alert('No purchase items');
-  
-  try {
-    const totalSpend = purchaseItems.reduce((s, x) => s + ((Number(x.quantity) || 0) * (Number(x.costPrice) || 0)), 0);
-    
-    const res = await apiRequest('purchase', {
-      store: storeName(),
-      supplier: document.getElementById('purchase-supplier').value,
-      paymentMethod: document.getElementById('purchase-payment').value,
-      items: purchaseItems,
-      totalSpend,
-      timestamp: new Date().toISOString()
-    });
-    
-    if (!res.ok) throw new Error(res.error || 'Purchase submit failed');
-    
-    alert(`Submitted ${res.inserted} purchase line(s)`);
-    purchaseItems = [];
-    updatePurchaseTable();
-    hidePurchaseModal();
-    setStatus(`Purchases synced: ${res.inserted}`);
-    loadProducts(); // Refresh stock levels
-  } catch (error) {
-    console.error(error);
-    setStatus('Purchase sync failed');
-    alert('Purchase submission failed: ' + error.message);
-  }
-}
-
-// Make functions available globally for onclick handlers
 window.checkLogin = checkLogin;
 window.selectStore = selectStore;
 window.removeSale = removeSale;
@@ -650,10 +672,3 @@ window.submitStockAdjustment = submitStockAdjustment;
 window.showExpenseModal = showExpenseModal;
 window.hideExpenseModal = hideExpenseModal;
 window.submitExpense = submitExpense;
-window.showPurchaseModal = showPurchaseModal;
-window.hidePurchaseModal = hidePurchaseModal;
-window.addItemToPurchase = addItemToPurchase;
-window.removePurchaseItem = removePurchaseItem;
-window.clearPurchases = clearPurchases;
-window.submitPurchases = submitPurchases;
-window.recalcPurchase = recalcPurchase;
