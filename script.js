@@ -16,51 +16,60 @@ let purchaseItems = [];
 function setStatus(message) { document.getElementById('sync-status').textContent = message; }
 function storeName() { return stores[currentStore]?.name || ''; }
 
-// Unified API request function using GET for everything (CORS-friendly for Apps Script)
+const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
+
 async function apiRequest(action, data = {}) {
-  const url = new URL(API_BASE_URL);
-  
-  // Add action parameter
-  url.searchParams.append('action', action);
-  
-  // Add store parameter if it exists in data
-  if (data.store) {
-    url.searchParams.append('store', data.store);
-  }
-  
-  // For operations that need data, stringify and add as a parameter
-  if (Object.keys(data).length > 0) {
-    // Remove store from data before stringifying to avoid duplication
-    const dataCopy = { ...data };
-    delete dataCopy.store;
-    if (Object.keys(dataCopy).length > 0) {
-      url.searchParams.append('data', JSON.stringify(dataCopy));
-    }
-  }
-  
-  console.log('Request URL:', url.toString());
-  console.log('Request action:', action);
-  console.log('Request data:', data);
-  
+  const readActions = ['health', 'products', 'stock'];
+
   try {
-    const response = await fetch(url.toString(), {
-      method: 'GET', // Always use GET for Apps Script to avoid CORS preflight
-      mode: 'cors',
-      headers: {
-        'Accept': 'application/json',
+    let response;
+
+    if (readActions.includes(action)) {
+      const url = new URL(API_BASE_URL);
+      url.searchParams.set('action', action);
+
+      if (data.store) {
+        url.searchParams.set('store', data.store);
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+
+      response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+    } else {
+      const payload = {
+        action,
+        ...data
+      };
+
+      response = await fetch(API_BASE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(payload)
+      });
     }
-    
-    const result = await response.json();
-    console.log('Response:', result);
+
+    const text = await response.text();
+
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch (parseErr) {
+      throw new Error('Server did not return JSON: ' + text);
+    }
+
+    if (!response.ok) {
+      throw new Error(result.error || `HTTP ${response.status}`);
+    }
+
     return result;
   } catch (error) {
     console.error('API Request Error:', error);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message || String(error) };
   }
 }
 
