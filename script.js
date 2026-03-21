@@ -1,4 +1,4 @@
-const POS_API_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
+const POS_API_URL = 'https://script.google.com/macros/s/AKfycbxsQR3z1P7ND5OOFf16PbfeYXpKNUadalDQ5EgnqVGFubbXDFsjXCfuCdPEEQkpQ9F-/exec';
 
 const stores = {
   store1: { name: 'One Stop', users: { Cashier: 'Glam2025' } },
@@ -106,29 +106,68 @@ function selectStore(storeId) {
 async function loadProducts() {
   try {
     setStatus('Loading products...');
-    const res = await apiRequest('products', { store: storeName() });
     
-    if (!res.ok) throw new Error(res.error || 'Failed to load products');
+    const store = storeName();
+    console.log('Loading products for store:', store);
+    
+    const res = await apiRequest('products', { store: store });
+    
+    // Enhanced logging
+    console.log('API Response:', JSON.stringify(res, null, 2));
+    
+    if (!res) {
+      throw new Error('No response from API');
+    }
+    
+    if (!res.ok) {
+      console.error('API returned not ok:', res);
+      throw new Error(res.error || 'Failed to load products');
+    }
+    
+    if (!res.data) {
+      console.error('No data in response:', res);
+      throw new Error('API returned no data');
+    }
+    
+    if (!Array.isArray(res.data)) {
+      console.error('Data is not an array:', typeof res.data);
+      throw new Error('API returned invalid data structure');
+    }
+    
+    if (res.data.length === 0) {
+      console.warn('API returned empty product list');
+      setStatus('No products found in the feed');
+      products = [];
+      populateDatalist();
+      return;
+    }
+    
+    console.log('First product sample:', res.data[0]);
     
     products = res.data.map(p => ({
       id: p.productId,
       name: p.productName,
-      prices: { ct: Number(p.priceCt) || 0, dz: Number(p.priceDz) || 0, pc: Number(p.pricePc) || 0 },
+      prices: { 
+        ct: Number(p.priceCt) || 0, 
+        dz: Number(p.priceDz) || 0, 
+        pc: Number(p.pricePc) || 0 
+      },
       stock: Number(p.stock) || 0,
       stockStore1: Number(p.stockOneStop) || 0,
       stockStore2: Number(p.stockGolden) || 0,
       countingUnit: p.countingUnit || 'pc'
     }));
     
+    console.log(`Successfully loaded ${products.length} products`);
     populateDatalist();
     setStatus(`Loaded ${products.length} products`);
+    
   } catch (error) {
-    console.error(error);
-    setStatus('Sync failed');
-    alert('Failed to load product feed from Apps Script');
+    console.error('Error in loadProducts:', error);
+    setStatus('Sync failed: ' + error.message);
+    alert('Failed to load product feed from Apps Script\n\nError: ' + error.message + '\n\nCheck console for details');
   }
 }
-
 function populateDatalist() {
   const dl = document.getElementById('item-list');
   dl.innerHTML = '';
