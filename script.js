@@ -16,8 +16,6 @@ let purchaseItems = [];
 function setStatus(message) { document.getElementById('sync-status').textContent = message; }
 function storeName() { return stores[currentStore]?.name || ''; }
 
-const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
-
 async function apiRequest(action, data = {}) {
   const readActions = ['health', 'products', 'stock'];
 
