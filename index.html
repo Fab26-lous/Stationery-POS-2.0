@@ -280,13 +280,6 @@
       gap: 10px;
       flex-wrap: wrap;
     }
-
-    .section-grid {
-      display: grid;
-      grid-template-columns: 380px 1fr;
-      gap: 20px;
-    }
-
     .panel {
       border: 1px solid var(--line);
       border-radius: 16px;
@@ -429,6 +422,40 @@
         padding: 18px;
       }
     }
+    .stack-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.toolbar-large {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-wide {
+  min-width: 170px;
+  justify-content: center;
+}
+
+.stock-info-box {
+  padding: 12px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.adjustment-stock-info {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  color: #166534;
+  font-weight: 600;
+}
   </style>
 </head>
 <body>
@@ -484,112 +511,114 @@
           <div class="muted">Professional stationery point of sale</div>
         </div>
 
-        <div class="toolbar">
-          <button class="btn btn-secondary" onclick="showStockLevels()">View Stock</button>
-          <button class="btn btn-warning" onclick="showStockAdjustment()">Stock Adjustment</button>
-          <button class="btn btn-danger" onclick="showExpenseModal()">Expense</button>
+       <div class="toolbar toolbar-large">
+  <button class="btn btn-secondary" onclick="showStockLevels()">View Stock</button>
+  <button class="btn btn-warning btn-wide" onclick="showStockAdjustment()">Stock Adjustment</button>
+  <button class="btn btn-danger btn-wide" onclick="showExpenseModal()">Record Expense</button>
+</div>
+
+     <div class="stack-layout">
+  <!-- SALES FORM -->
+  <div class="panel">
+    <h3>New Sale</h3>
+
+    <form id="sale-form">
+      <div class="form-grid">
+        <div class="full">
+          <label for="item">Product</label>
+          <input id="item" list="item-list" type="text" placeholder="Search product name" autocomplete="off" />
+          <datalist id="item-list"></datalist>
+        </div>
+
+        <div class="full">
+          <div id="selected-stock-info" class="stock-info-box">Select an item to view stock</div>
+        </div>
+
+        <div>
+          <label for="unit">Unit</label>
+          <select id="unit">
+            <option value="pc">pc</option>
+            <option value="dz">dz</option>
+            <option value="ct">ct</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="quantity">Quantity</label>
+          <input id="quantity" type="number" step="any" min="0" />
+        </div>
+
+        <div>
+          <label for="price">Price</label>
+          <input id="price" type="number" step="any" min="0" />
+        </div>
+
+        <div>
+          <label for="discount">Discount</label>
+          <input id="discount" type="number" step="any" min="0" value="0" />
+        </div>
+
+        <div>
+          <label for="extra">Extra</label>
+          <input id="extra" type="number" step="any" value="0" />
+        </div>
+
+        <div>
+          <label for="payment-method">Payment Method</label>
+          <select id="payment-method">
+            <option value="Cash">Cash</option>
+            <option value="Mobile Money">Mobile Money</option>
+            <option value="Bank">Bank</option>
+            <option value="Credit">Credit</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="total">Total</label>
+          <input id="total" type="number" step="any" readonly />
         </div>
       </div>
 
-      <div class="section-grid">
-        <!-- SALES FORM -->
-        <div class="panel">
-          <h3>New Sale</h3>
-
-          <form id="sale-form">
-            <div class="form-grid">
-              <div class="full">
-                <label for="item">Product</label>
-                <input id="item" list="item-list" type="text" placeholder="Search product name" autocomplete="off" />
-                <datalist id="item-list"></datalist>
-              </div>
-
-              <div>
-                <label for="unit">Unit</label>
-                <select id="unit">
-                  <option value="pc">pc</option>
-                  <option value="dz">dz</option>
-                  <option value="ct">ct</option>
-                </select>
-              </div>
-
-              <div>
-                <label for="quantity">Quantity</label>
-                <input id="quantity" type="number" step="any" min="0" />
-              </div>
-
-              <div>
-                <label for="price">Price</label>
-                <input id="price" type="number" step="any" min="0" />
-              </div>
-
-              <div>
-                <label for="discount">Discount</label>
-                <input id="discount" type="number" step="any" min="0" value="0" />
-              </div>
-
-              <div>
-                <label for="extra">Extra</label>
-                <input id="extra" type="number" step="any" value="0" />
-              </div>
-
-              <div>
-                <label for="payment-method">Payment Method</label>
-                <select id="payment-method">
-                  <option value="Cash">Cash</option>
-                  <option value="Mobile Money">Mobile Money</option>
-                  <option value="Bank">Bank</option>
-                  <option value="Credit">Credit</option>
-                </select>
-              </div>
-
-              <div>
-                <label for="total">Total</label>
-                <input id="total" type="number" step="any" readonly />
-              </div>
-            </div>
-
-            <div class="action-row">
-              <button type="submit" class="btn btn-primary">Add to Sale</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- CURRENT SALES -->
-        <div class="panel">
-          <h3>Current Sale Items</h3>
-
-          <div class="table-wrap">
-            <table id="sales-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Item</th>
-                  <th>Unit</th>
-                  <th>Qty</th>
-                  <th>Price</th>
-                  <th>Discount</th>
-                  <th>Extra</th>
-                  <th>Total</th>
-                  <th>Payment</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td colspan="10" class="muted">No items added yet</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="action-row">
-            <button id="submit-all-btn" class="btn btn-success hidden" onclick="submitAllSales()">Submit Sales</button>
-            <button id="clear-all-btn" class="btn btn-secondary hidden" onclick="clearAllSales()">Clear</button>
-          </div>
-        </div>
+      <div class="action-row">
+        <button type="submit" class="btn btn-primary">Add to Sale</button>
       </div>
+    </form>
+  </div>
+
+  <!-- CURRENT SALES -->
+  <div class="panel">
+    <h3>Current Sale Items</h3>
+
+    <div class="table-wrap">
+      <table id="sales-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Item</th>
+            <th>Unit</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Discount</th>
+            <th>Extra</th>
+            <th>Total</th>
+            <th>Payment</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="10" class="muted">No items added yet</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
+
+    <div class="action-row">
+      <button id="submit-all-btn" class="btn btn-success hidden" onclick="submitAllSales()">Submit Sales</button>
+      <button id="clear-all-btn" class="btn btn-secondary hidden" onclick="clearAllSales()">Clear</button>
+    </div>
+  </div>
+</div>
 
     <!-- STOCK LEVELS MODAL -->
     <div id="stock-modal" class="modal">
