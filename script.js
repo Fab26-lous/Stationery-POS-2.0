@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
+const POS_API_URL = 'https://script.google.com/macros/s/AKfycbz-GigCJQ4CuWoi-o0_AgX7afavQC3sNcaK2lQDfbj8ngMJmwzMgkvbgean06uqFsiBaA/exec';
 
 const stores = {
   store1: { name: 'One Stop', users: { Cashier: 'Glam2025' } },
@@ -42,7 +42,7 @@ async function apiRequest(action, data = {}) {
         ...data
       };
 
-      response = await fetch(API_BASE_URL, {
+      response = await fetch(POS_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8'
