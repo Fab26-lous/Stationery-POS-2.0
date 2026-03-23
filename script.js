@@ -5,7 +5,7 @@ const stores = {
   store2: { name: 'Golden', users: { Cashier2: 'Glam2025' } }
 };
 
-const LOCAL_QUEUE_KEY = 'stationery_pos_sync_queue_v2';
+const LOCAL_QUEUE_KEY = 'stationery_pos_sync_queue_v3';
 
 let currentStore = null;
 let currentUser = null;
@@ -140,7 +140,6 @@ async function processQueue() {
       } else {
         console.error('Queue sync failed:', job, result);
         setStatus(`${getQueue().length} pending. Sync will retry automatically.`, 'error');
-        isSyncing = false;
         return;
       }
     }
@@ -274,12 +273,59 @@ function populateAdjustmentDatalist() {
   });
 }
 
+function updateSelectedStockInfo() {
+  const itemName = document.getElementById('item')?.value.trim().toLowerCase();
+  const box = document.getElementById('selected-stock-info');
+  if (!box) return;
+
+  if (!itemName) {
+    box.textContent = 'Select an item to view stock';
+    return;
+  }
+
+  const product = products.find(p => p.name.toLowerCase() === itemName);
+  if (!product) {
+    box.textContent = 'Product not found in feed';
+    return;
+  }
+
+  const currentStoreStock = currentStore === 'store1' ? product.stockStore1 : product.stockStore2;
+  const otherStoreStock = currentStore === 'store1' ? product.stockStore2 : product.stockStore1;
+  const otherStoreName = currentStore === 'store1' ? 'Golden' : 'One Stop';
+
+  box.textContent = `Current stock here: ${currentStoreStock} | ${otherStoreName}: ${otherStoreStock}`;
+}
+
+function updateAdjustmentStockInfo() {
+  const itemName = document.getElementById('adjustment-search')?.value.trim().toLowerCase();
+  const box = document.getElementById('adjustment-stock-info');
+  if (!box) return;
+
+  if (!itemName) {
+    box.textContent = 'Search an item to view stock';
+    return;
+  }
+
+  const product = products.find(p => p.name.toLowerCase() === itemName);
+  if (!product) {
+    box.textContent = 'Product not found in feed';
+    return;
+  }
+
+  const currentStoreStock = currentStore === 'store1' ? product.stockStore1 : product.stockStore2;
+  const otherStoreStock = currentStore === 'store1' ? product.stockStore2 : product.stockStore1;
+  const otherStoreName = currentStore === 'store1' ? 'Golden' : 'One Stop';
+
+  box.textContent = `Current stock here: ${currentStoreStock} | ${otherStoreName}: ${otherStoreStock}`;
+}
+
 function updatePrice() {
   const itemName = document.getElementById('item').value.trim().toLowerCase();
   const unit = document.getElementById('unit').value;
   const product = products.find(p => p.name.toLowerCase() === itemName);
 
   document.getElementById('price').value = product ? (product.prices[unit] || 0) : '';
+  updateSelectedStockInfo();
   calculateTotal();
 }
 
@@ -297,6 +343,8 @@ function resetForm() {
   document.getElementById('sale-form').reset();
   document.getElementById('price').value = '';
   document.getElementById('total').value = '';
+  const box = document.getElementById('selected-stock-info');
+  if (box) box.textContent = 'Select an item to view stock';
 }
 
 function updateSalesTable() {
@@ -323,7 +371,7 @@ function updateSalesTable() {
         <td>${sale.extra.toFixed(2)}</td>
         <td>${sale.total.toFixed(2)}</td>
         <td>${sale.paymentMethod}</td>
-        <td><button class="btn btn-mini" onclick="removeSale(${index})">×</button></td>
+        <td><button class="btn-mini" onclick="removeSale(${index})">×</button></td>
       `;
       tbody.appendChild(tr);
     });
@@ -462,9 +510,15 @@ function showStockAdjustment() {
   document.getElementById('stock-adjustment-modal').style.display = 'flex';
 
   const input = document.getElementById('adjustment-search');
+  const info = document.getElementById('adjustment-stock-info');
+
   if (input) {
     input.value = '';
     input.focus();
+  }
+
+  if (info) {
+    info.textContent = 'Search an item to view stock';
   }
 }
 
@@ -529,7 +583,7 @@ function updateAdjustmentTable() {
           <input type="number" step="any" min="0" value="${item.quantity}" onchange="adjustmentItems[${index}].quantity=Number(this.value||0)">
         </td>
         <td>
-          <button class="btn btn-mini" onclick="removeAdjustmentItem(${index})">Remove</button>
+          <button class="btn-mini" onclick="removeAdjustmentItem(${index})">Remove</button>
         </td>
       `;
       tbody.appendChild(tr);
@@ -621,6 +675,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const unitSelect = document.getElementById('unit');
   if (unitSelect) unitSelect.addEventListener('change', updatePrice);
+
+  const adjustmentInput = document.getElementById('adjustment-search');
+  if (adjustmentInput) adjustmentInput.addEventListener('input', updateAdjustmentStockInfo);
 
   const saleForm = document.getElementById('sale-form');
   if (saleForm) {
